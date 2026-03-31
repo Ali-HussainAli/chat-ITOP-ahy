@@ -1,5 +1,5 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import Sidebar from '@/components/chat/Sidebar'
@@ -10,16 +10,22 @@ export default function ChatPage() {
   const { user, theme } = useAuthStore()
   const { activeChat } = useChatStore()
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
     // تطبيق الثيم المحفوظ
     document.documentElement.setAttribute('data-theme', theme)
     // التحقق من تسجيل الدخول
     if (!user) router.replace('/login')
     else if (user.is_banned) router.replace('/login')
-  }, [user, router, theme])
+  }, [user, router, theme, mounted])
 
-  if (!user) return null
+  if (!mounted || !user) return null
 
   return (
     <div className="app-container">

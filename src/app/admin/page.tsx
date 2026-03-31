@@ -46,12 +46,20 @@ export default function AdminPage() {
   const [allMessages, setAllMessages] = useState<AdminMessage[]>([])
   const [stats, setStats] = useState<Stats>({ users: 0, messages: 0, activeToday: 0, reports: 0 })
   const [loading, setLoading] = useState(true)
+  const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
-    if (!user) { router.replace('/login'); return }
-    if (user.role !== 'admin') { router.replace('/chat'); return }
-    loadAll()
-  }, [user, router])
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    if (!user || user.role !== 'admin') {
+      router.replace('/chat')
+    } else {
+      loadAll()
+    }
+  }, [user, router, mounted])
 
   const loadAll = async () => {
     setLoading(true)

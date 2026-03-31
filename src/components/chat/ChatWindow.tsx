@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowRight, Phone, Video, MoreVertical, Send, Paperclip,
-  Mic, Smile, Image, X, Reply, Trash2, MessageCircle, User, Clock, CheckCircle
+  Mic, MicOff, Smile, Image, X, Reply, Trash2, MessageCircle, User, Clock, CheckCircle
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/store/authStore'
@@ -31,9 +31,13 @@ export default function ChatWindow() {
   const [timerMenu, setTimerMenu] = useState(false)
   const [deleteTimer, setDeleteTimer] = useState<number>(0)
   const [nowTick, setNowTick] = useState<number>(Date.now())
+  const [isRecording, setIsRecording] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const typingTimeout = useRef<NodeJS.Timeout | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const pressTimer = useRef<NodeJS.Timeout | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
 
   // Update tick every 10s to auto-hide expired messages live
   useEffect(() => {
@@ -125,6 +129,8 @@ export default function ChatWindow() {
     if (!file || !activeChat || !user) return
     const ext = file.name.split('.').pop()
     const path = `chat-media/${activeChat.id}/${Date.now()}.${ext}`
+    
+    // Quick local preview logic would go here if needed, but we go direct to DB for simplicity
     const { data: uploadData } = await supabase.storage.from('chat-media').upload(path, file)
     if (uploadData) {
       const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path)
@@ -136,6 +142,53 @@ export default function ChatWindow() {
         expires_at: deleteTimer > 0 ? new Date(Date.now() + deleteTimer * 60000).toISOString() : null,
       })
     }
+  }
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream)
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e) => audioChunksRef.current.push(e.data)
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        if (!activeChat || !user) return
+        const path = `chat-media/${activeChat.id}/audio-${Date.now()}.webm`
+        const { data: uploadData } = await supabase.storage.from('chat-media').upload(path, audioBlob)
+        if (uploadData) {
+          const { data: urlData } = supabase.storage.from('chat-media').getPublicUrl(path)
+          await supabase.from('messages').insert({
+            chat_id: activeChat.id, sender_id: user.id, media_url: urlData.publicUrl, media_type: 'audio',
+            expires_at: deleteTimer > 0 ? new Date(Date.now() + deleteTimer * 60000).toISOString() : null,
+          })
+        }
+      }
+      mediaRecorder.start()
+      setIsRecording(true)
+    } catch (e) {
+      alert('الرجاء السماح بالوصول للميكروفون لتسجيل الصوت.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop())
+    }
+    setIsRecording(false)
+  }
+
+  // Mobile Long Press Logic
+  const handleTouchStart = (msg: Message, e: React.TouchEvent) => {
+    pressTimer.current = setTimeout(() => {
+      setContextMenu({ msg, x: e.touches[0].clientX, y: e.touches[0].clientY })
+      if (window.navigator?.vibrate) window.navigator.vibrate(50)
+    }, 450)
+  }
+  const handleTouchEnd = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current)
   }
 
   const deleteForEveryone = async (msgId: string) => {
@@ -284,8 +337,12 @@ export default function ChatWindow() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
                 transition={{ duration: 0.2 }}
-                className={`flex ${isMine ? 'justify-start' : 'justify-end'}`}
-                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ msg, x: e.clientX, y: e.clientY }) }}>
+                className={`flex w-full ${isMine ? 'justify-start' : 'justify-end'}`}
+                onContextMenu={(e) => { e.preventDefault(); setContextMenu({ msg, x: e.clientX, y: e.clientY }) }}
+                onTouchStart={(e) => handleTouchStart(msg, e)}
+                onTouchEnd={handleTouchEnd}
+                onTouchMove={handleTouchEnd}
+              >
 
                 <div className={`message-bubble ${isMine ? 'sent' : 'received'}`}>
                   {/* الرد على رسالة */}
@@ -298,10 +355,16 @@ export default function ChatWindow() {
                   {msg.deleted_for_everyone ? (
                     <p className="italic text-sm" style={{ color: 'var(--text-tertiary)' }}>🚫 تم حذف هذه الرسالة</p>
                   ) : msg.media_url ? (
-                    <div className="rounded-xl overflow-hidden">
-                      {msg.media_type === 'image'
-                        ? <img src={msg.media_url} alt="media" className="max-w-xs rounded-xl cursor-pointer" onClick={() => window.open(msg.media_url!, '_blank')} />
-                        : <video src={msg.media_url} controls className="max-w-xs rounded-xl" />}
+                    <div className="rounded-xl overflow-hidden mb-1">
+                      {msg.media_type === 'image' && (
+                        <img src={msg.media_url} alt="media" className="max-w-[240px] rounded-xl cursor-pointer" onClick={() => window.open(msg.media_url!, '_blank')} />
+                      )}
+                      {msg.media_type === 'video' && (
+                        <video src={msg.media_url} controls className="max-w-[240px] rounded-xl" />
+                      )}
+                      {msg.media_type === 'audio' && (
+                        <audio src={msg.media_url} controls className="w-[240px] h-[40px]" />
+                      )}
                     </div>
                   ) : (
                     <p className="text-sm leading-relaxed" style={{ color: 'var(--text-primary)' }}>{msg.content}</p>
@@ -378,32 +441,47 @@ export default function ChatWindow() {
           <Send size={18} color={text.trim() ? '#000' : 'var(--text-tertiary)'} />
         </motion.button>
 
-        {/* حقل الكتابة */}
-        <div className="flex-1 relative">
-          <textarea
-            rows={1}
-            placeholder="اكتب رسالة..."
-            value={text}
-            onChange={(e) => { handleTyping(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-            className="chat-input resize-none text-right"
-            style={{ maxHeight: '120px', overflow: 'auto', padding: '12px 16px' }}
-          />
+          {/* حقل الكتابة و جارٍ التسجيل */}
+        <div className="flex-1 relative flex items-center">
+          {isRecording ? (
+            <motion.div initial={{ opacity: 0, width: 0 }} animate={{ opacity: 1, width: '100%' }} className="flex-1 flex items-center gap-2 justify-end px-4 text-red-500 font-bold" style={{ direction: 'rtl' }}>
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+              جارٍ تسجيل الصوت...
+            </motion.div>
+          ) : (
+            <textarea
+              rows={1}
+              placeholder="اكتب رسالة..."
+              value={text}
+              onChange={(e) => { handleTyping(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px' }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
+              className="chat-input resize-none text-right"
+              style={{ maxHeight: '120px', overflow: 'auto', padding: '12px 16px', borderRadius: '25px', width: '100%' }}
+            />
+          )}
         </div>
 
-        {/* أزرار المرفقات */}
+        {/* أزرار المرفقات والمايك */}
         <div className="flex items-center gap-2">
-          <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleImageUpload} />
+          {!isRecording && (
+            <>
+              <input ref={fileRef} type="file" accept="image/*,video/*" className="hidden" onChange={handleImageUpload} />
+              <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                onClick={() => fileRef.current?.click()}
+                className="w-10 h-10 rounded-full flex items-center justify-center shadow-sm"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', cursor: 'pointer' }}>
+                <Image size={18} style={{ color: 'var(--color-primary)' }} />
+              </motion.button>
+            </>
+          )}
+
           <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-            onClick={() => fileRef.current?.click()}
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', cursor: 'pointer' }}>
-            <Image size={16} style={{ color: 'var(--text-secondary)' }} />
-          </motion.button>
-          <motion.button whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
-            className="w-9 h-9 rounded-xl flex items-center justify-center"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-color)', cursor: 'pointer' }}>
-            <Mic size={16} style={{ color: 'var(--text-secondary)' }} />
+            onPointerDown={startRecording}
+            onPointerUp={stopRecording}
+            onPointerLeave={isRecording ? stopRecording : undefined}
+            className={`w-10 h-10 rounded-full flex items-center justify-center shadow-sm transition-all ${isRecording ? 'pulse' : ''}`}
+            style={{ background: isRecording ? '#FF3B30' : 'var(--bg-elevated)', border: `1px solid ${isRecording ? '#FF3B30' : 'var(--border-color)'}`, cursor: 'pointer' }}>
+            {isRecording ? <MicOff size={18} color="#FFF" /> : <Mic size={18} style={{ color: 'var(--text-secondary)' }} />}
           </motion.button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { ShieldCheck } from 'lucide-react'
+import { BadgeCheck } from 'lucide-react'
 
 const colorMap: Record<string, string> = {
   gold: '#FFD700',
@@ -20,7 +20,7 @@ export default function VerificationBadge({ color, size = 14 }: { color: string 
   if (!color) return null
   return (
     <span title={tooltipMap[color] || 'موثق'}>
-      <ShieldCheck size={size} color={colorMap[color] || '#FFD700'} fill={colorMap[color] || '#FFD700'} strokeWidth={1.5} />
+      <BadgeCheck size={size + 2} color="#ffffff" fill={colorMap[color] || '#FFD700'} strokeWidth={2} />
     </span>
   )
 }

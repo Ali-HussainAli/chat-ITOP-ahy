@@ -18,12 +18,26 @@ const VERIFY_LABELS: Record<string, string> = {
 export default function ProfilePage() {
   const { user, setUser } = useAuthStore()
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
   const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(user?.name || '')
-  const [bio, setBio] = useState(user?.bio || '')
+  const [name, setName] = useState('')
+  const [bio, setBio] = useState('')
   const [loading, setLoading] = useState(false)
   const [reportReason, setReportReason] = useState('')
   const [showReport, setShowReport] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
+    if (!user) router.replace('/login')
+    else {
+      setName(user.name || '')
+      setBio(user.bio || '')
+    }
+  }, [user, router, mounted])
 
   const handleSave = async () => {
     setLoading(true)
